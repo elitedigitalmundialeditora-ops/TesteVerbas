@@ -425,65 +425,79 @@
         setTimeout(() => toast.remove(), 3000);
     }
     
-    // ===================== COMUNICAÇÃO COM API (MÉTODO CORRETO) =====================
-    async function callAPI(action, data = {}) {
-        if (isLoading) return null;
-        isLoading = true;
-        document.body.classList.add('loading');
+    // ===================== COMUNICAÇÃO COM API USANDO JSONP =====================
+    function jsonpRequest(params, callback) {
+        const callbackName = 'jsonp_callback_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+        const script = document.createElement('script');
         
-        try {
-            const payload = { action, ...data };
-            
-            // Usar POST com modo cors para receber resposta
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                mode: 'cors',
-                headers: { 
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            
-            const result = await response.json();
-            return result;
-        } catch (error) {
-            console.error(`Erro na API (${action}):`, error);
-            showToast(`Erro de conexão: ${error.message}`, true);
-            return null;
-        } finally {
-            isLoading = false;
-            document.body.classList.remove('loading');
-        }
+        window[callbackName] = function(data) {
+            delete window[callbackName];
+            document.body.removeChild(script);
+            callback(data);
+        };
+        
+        const urlParams = new URLSearchParams(params);
+        urlParams.set('callback', callbackName);
+        script.src = `${API_URL}?${urlParams.toString()}`;
+        script.onerror = function() {
+            delete window[callbackName];
+            document.body.removeChild(script);
+            callback({ success: false, error: 'Erro de conexão' });
+        };
+        
+        document.body.appendChild(script);
+    }
+    
+    // Função para fazer requisições POST via iframe (alternativa para evitar CORS)
+    function postViaIframe(action, data, callback) {
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+        
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = API_URL;
+        form.target = iframe.name;
+        form.style.display = 'none';
+        
+        const input = document.createElement('input');
+        input.name = 'data';
+        input.value = JSON.stringify({ action, ...data });
+        form.appendChild(input);
+        
+        iframe.name = 'iframe_' + Date.now();
+        document.body.appendChild(form);
+        
+        iframe.onload = function() {
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+                document.body.removeChild(form);
+                if (callback) callback({ success: true });
+            }, 500);
+        };
+        
+        form.submit();
     }
     
     // ===================== CARREGAR DADOS DO SERVIDOR =====================
     async function loadAllDataFromAPI() {
-        try {
-            const result = await callAPI('getData');
-            
-            if (result && result.success) {
-                monthlyBudget = result.monthlyBudget || 0;
-                previousRemaining = result.previousRemaining || 0;
-                expenses = result.expenses || [];
-                customCategories = result.categories || ["Gincana", "Premiação", "Evento", "Outros"];
-                updateAllUI();
-                return true;
-            } else {
-                // Fallback para localStorage se API falhar
-                loadFromLocalStorage();
-                updateAllUI();
-                return false;
-            }
-        } catch (error) {
-            console.error('Erro ao carregar dados:', error);
-            loadFromLocalStorage();
-            updateAllUI();
-            return false;
-        }
+        return new Promise((resolve) => {
+            jsonpRequest({ action: 'getData' }, (result) => {
+                if (result && result.success) {
+                    monthlyBudget = result.monthlyBudget || 0;
+                    previousRemaining = result.previousRemaining || 0;
+                    expenses = result.expenses || [];
+                    customCategories = result.categories || ["Gincana", "Premiação", "Evento", "Outros"];
+                    updateAllUI();
+                    resolve(true);
+                } else {
+                    console.error('Erro ao carregar dados, usando localStorage');
+                    loadFromLocalStorage();
+                    updateAllUI();
+                    resolve(false);
+                }
+            });
+        });
     }
     
     // Fallback localStorage
@@ -592,13 +606,10 @@
                         showToast("É necessário manter pelo menos uma categoria.", true);
                         return; 
                     }
-                    const result = await callAPI('deleteCategory', { category: catToRemove });
-                    if(result && result.success) {
+                    postViaIframe('deleteCategory', { category: catToRemove }, () => {
                         showToast("Categoria removida!");
-                        await loadAllDataFromAPI();
-                    } else {
-                        showToast("Erro ao remover categoria", true);
-                    }
+                        setTimeout(() => loadAllDataFromAPI(), 500);
+                    });
                 });
             });
         }
@@ -664,13 +675,10 @@
         document.querySelectorAll('.deleteExpenseBtn').forEach(btn => btn.addEventListener('click', async (e)=> { 
             const id = parseInt(btn.getAttribute('data-id')); 
             if(confirm("Excluir esta despesa permanentemente?")) {
-                const result = await callAPI('deleteExpense', { id: id });
-                if(result && result.success) {
+                postViaIframe('deleteExpense', { id: id }, () => {
                     showToast("Despesa excluída!");
-                    await loadAllDataFromAPI();
-                } else {
-                    showToast("Erro ao excluir despesa", true);
-                }
+                    setTimeout(() => loadAllDataFromAPI(), 500);
+                });
             }
         }));
     }
@@ -732,23 +740,19 @@
                 fileName 
             };
             
-            const result = await callAPI('addExpense', { expense: newExpense });
-            if(result && result.success) {
+            postViaIframe('addExpense', { expense: newExpense }, () => {
                 showToast("Despesa adicionada!");
-                await loadAllDataFromAPI();
-                
-                document.getElementById("expenseDate").value = "";
-                document.getElementById("expenseValue").value = "";
-                document.getElementById("expenseName").value = "";
-                document.getElementById("expenseObs").value = "";
-                document.getElementById("expenseFile").value = "";
-                
-                // Resetar data para agora
-                const now = new Date().toISOString().slice(0,16);
-                document.getElementById("expenseDate").value = now;
-            } else {
-                showToast("Erro ao adicionar despesa", true);
-            }
+                setTimeout(() => loadAllDataFromAPI(), 500);
+            });
+            
+            document.getElementById("expenseDate").value = "";
+            document.getElementById("expenseValue").value = "";
+            document.getElementById("expenseName").value = "";
+            document.getElementById("expenseObs").value = "";
+            document.getElementById("expenseFile").value = "";
+            
+            const now = new Date().toISOString().slice(0,16);
+            document.getElementById("expenseDate").value = now;
         };
         
         if(fileInput.files.length) {
@@ -768,13 +772,10 @@
         if(isNaN(newMonthly)) newMonthly = 0;
         if(isNaN(newPrev)) newPrev = 0;
         
-        const result = await callAPI('updateBudget', { monthlyBudget: newMonthly, previousRemaining: newPrev });
-        if(result && result.success) {
+        postViaIframe('updateBudget', { monthlyBudget: newMonthly, previousRemaining: newPrev }, () => {
             showToast("Verbas atualizadas!");
-            await loadAllDataFromAPI();
-        } else {
-            showToast("Erro ao atualizar verbas", true);
-        }
+            setTimeout(() => loadAllDataFromAPI(), 500);
+        });
     }
     
     async function addNewCategory() {
@@ -782,14 +783,11 @@
         if(!newCat) { showToast("Digite uma categoria", true); return; }
         if(customCategories.includes(newCat)) { showToast("Categoria já existe", true); return; }
         
-        const result = await callAPI('addCategory', { category: newCat });
-        if(result && result.success) {
+        postViaIframe('addCategory', { category: newCat }, () => {
             showToast("Categoria adicionada!");
-            await loadAllDataFromAPI();
+            setTimeout(() => loadAllDataFromAPI(), 500);
             document.getElementById("newCategoryName").value = "";
-        } else {
-            showToast("Erro ao adicionar categoria", true);
-        }
+        });
     }
     
     // ===================== INICIALIZAÇÃO =====================

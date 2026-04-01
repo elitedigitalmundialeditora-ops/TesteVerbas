@@ -283,7 +283,6 @@
 
     <!-- ===================== ABA DASHBOARD ===================== -->
     <div id="dashboardTab" class="tab-content active-tab">
-        <!-- cards de verba mensal -->
         <div class="stats-grid" id="statsBudgetContainer">
             <div class="stat-card"><div class="stat-title">💰 VERBA DO MÊS</div><div class="stat-value" id="monthlyBudget">R$ 0,00</div><div class="stat-sub">Valor recebido este mês</div></div>
             <div class="stat-card"><div class="stat-title">🔄 SOBRA MÊS ANTERIOR</div><div class="stat-value" id="previousRemaining">R$ 0,00</div><div class="stat-sub">Saldo que veio do mês passado</div></div>
@@ -316,10 +315,9 @@
 
     <!-- ===================== ABA BACKEND / GESTÃO ===================== -->
     <div id="backendTab" class="tab-content">
-        <!-- Configuração de verbas mensais -->
         <div class="config-card">
             <div class="section-title">💰 Configurar Verbas Mensais</div>
-            <div class="budget-row" style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <div class="budget-row">
                 <div class="input-group" style="flex:1">
                     <label>Verba recebida neste mês (R$)</label>
                     <input type="number" id="inputMonthlyBudget" step="0.01" placeholder="Ex: 35000">
@@ -333,7 +331,6 @@
             <p style="font-size:0.7rem; color:#6c8d9c; margin-top:12px;">*Os valores atualizam o dashboard e o controle de despesas.</p>
         </div>
 
-        <!-- Cadastro de novas despesas -->
         <div class="form-card">
             <div class="section-title">➕ Registrar nova despesa</div>
             <div class="form-grid">
@@ -347,7 +344,6 @@
             </div>
         </div>
 
-        <!-- Gestão de categorias personalizadas -->
         <div class="config-card">
             <div class="section-title">🏷️ Gerenciar Categorias (customizar)</div>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 20px;">
@@ -358,7 +354,6 @@
             <p style="font-size:0.7rem; margin-top: 12px;">*Categorias são salvas e aparecem nos formulários e listagens.</p>
         </div>
 
-        <!-- Listagem completa de despesas com ações -->
         <div class="list-card">
             <div class="section-title">📋 Todas as despesas (gerenciar)</div>
             <div style="overflow-x: auto;">
@@ -383,17 +378,16 @@
 </div>
 
 <script>
-    // Configuração: SUBSTITUA PELA URL DO SEU WEB APP DO GOOGLE APPS SCRIPT
-    const API_URL = 'https://script.google.com/macros/s/AKfycbxU8DJfkIUMZka6JTPZf9Goy1z5Yq7LmLScp_dz2bAEI8GMWcAWj5FN-6yk0gF2ViE/exec';
+    // 🔧 SUBSTITUA PELA URL REAL DO SEU WEB APP
+    const API_URL = 'https://script.google.com/macros/s/AKfycbxU8DJfkIUMZka6JTPZf9Goy1z5Yq7LmL';
     
-    // Estado global
     let monthlyBudget = 0;
     let previousRemaining = 0;
     let expenses = [];
     let customCategories = [];
     let isLoading = false;
     
-    // Função para chamar a API
+    // ===================== COMUNICAÇÃO COM API (CORS CORRETO) =====================
     async function callAPI(action, data = {}) {
         if (isLoading) return null;
         isLoading = true;
@@ -403,18 +397,19 @@
             const payload = { action, ...data };
             const response = await fetch(API_URL, {
                 method: 'POST',
-                mode: 'no-cors', // Importante para Apps Script
+                mode: 'cors',          // IMPORTANTE: mudado de 'no-cors' para 'cors'
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
             
-            // Como estamos usando no-cors, não podemos ler a resposta diretamente
-            // Por isso, vamos usar uma abordagem alternativa: após cada operação, recarregamos os dados
-            await loadAllDataFromAPI();
-            return { success: true };
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const result = await response.json();
+            return result;
         } catch (error) {
-            console.error('Erro na API:', error);
-            alert('Erro ao conectar com o servidor. Verifique sua conexão e a URL do Web App.');
+            console.error(`Erro na API (${action}):`, error);
             return null;
         } finally {
             isLoading = false;
@@ -422,52 +417,26 @@
         }
     }
     
-    // Carregar todos os dados da API
+    // ===================== CARREGAR DADOS DO SERVIDOR =====================
     async function loadAllDataFromAPI() {
-        if (isLoading) return;
-        isLoading = true;
-        document.body.classList.add('loading');
-        
-        try {
-            // Tentativa de fetch com timeout
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-            
-            const response = await fetch(`${API_URL}?action=getData`, {
-                method: 'GET',
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                monthlyBudget = data.monthlyBudget || 0;
-                previousRemaining = data.previousRemaining || 0;
-                expenses = data.expenses || [];
-                customCategories = data.categories || ["Gincana", "Premiação", "Evento", "Outros"];
-                
-                updateAllUI();
-            } else {
-                throw new Error(data.error || 'Erro ao carregar dados');
-            }
-        } catch (error) {
-            console.error('Erro ao carregar dados:', error);
-            // Se falhar, tenta usar localStorage como fallback
+        const result = await callAPI('getData');
+        if (result && result.success) {
+            monthlyBudget = result.monthlyBudget || 0;
+            previousRemaining = result.previousRemaining || 0;
+            expenses = result.expenses || [];
+            customCategories = result.categories || ["Gincana", "Premiação", "Evento", "Outros"];
+            updateAllUI();
+            return true;
+        } else {
+            // Fallback para localStorage
             loadFromLocalStorage();
-            alert('Usando dados locais. Verifique a conexão com o servidor.');
-        } finally {
-            isLoading = false;
-            document.body.classList.remove('loading');
+            updateAllUI();
+            console.log('Usando dados locais (fallback)');
+            return false;
         }
     }
     
-    // Fallback para localStorage
+    // Fallback localStorage
     function loadFromLocalStorage() {
         const storedMonthly = localStorage.getItem("ctrl_verbas_monthly");
         if(storedMonthly && !isNaN(parseFloat(storedMonthly))) monthlyBudget = parseFloat(storedMonthly);
@@ -487,7 +456,7 @@
         localStorage.setItem("ctrl_verbas_categories", JSON.stringify(customCategories));
     }
     
-    // Utilitários
+    // ===================== UTILITÁRIOS =====================
     function formatDate(dateStr) {
         if(!dateStr) return "";
         const d = new Date(dateStr);
@@ -505,9 +474,8 @@
         }); 
     }
     
-    // Atualizar todas as interfaces
+    // ===================== ATUALIZAR INTERFACE COMPLETA =====================
     function updateAllUI() {
-        // Calcular total disponível (verba mês + sobra anterior)
         const totalAvailable = monthlyBudget + previousRemaining;
         const totalUsed = expenses.reduce((sum, e) => sum + e.value, 0);
         const currentBalance = totalAvailable - totalUsed;
@@ -521,17 +489,14 @@
         if(currentBalance < 0) statusSpan.innerHTML = "⚠️ orçamento estourado";
         else statusSpan.innerHTML = "✔︎ saldo positivo";
         
-        // Gráfico simples
         drawBalanceChart(totalUsed, currentBalance);
         
-        // Últimas despesas (recent)
         const sorted = [...expenses].sort((a,b)=> new Date(b.date)-new Date(a.date));
         const recent3 = sorted.slice(0,3);
         const recentContainer = document.getElementById("recentListDashboard");
         if(recent3.length===0) recentContainer.innerHTML = '<li style="color:#8aaebd;">Nenhuma despesa</li>';
         else recentContainer.innerHTML = recent3.map(e=> `<li class="recent-item"><span>${escapeHtml(e.name)}</span><strong>R$ ${e.value.toFixed(2)}</strong></li>`).join('');
         
-        // Tabela resumo dashboard (últimas 5)
         const dashTableBody = document.getElementById("dashboardListBody");
         const last5 = sorted.slice(0,5);
         if(last5.length===0) dashTableBody.innerHTML = '<tr class="empty-row"><td colspan="5">Nenhum registro</td></tr>';
@@ -550,7 +515,6 @@
             showModal(id); 
         }));
         
-        // Atualizar select de categorias (backend)
         const catSelect = document.getElementById("expenseCategorySelect");
         if(catSelect) {
             catSelect.innerHTML = "";
@@ -562,11 +526,10 @@
             });
         }
         
-        // Lista de categorias gerenciável
         const catContainer = document.getElementById("categoriesListContainer");
         if(catContainer){
             catContainer.innerHTML = "";
-            customCategories.forEach((cat, idx) => {
+            customCategories.forEach((cat) => {
                 const chip = document.createElement("div");
                 chip.className = "category-tag";
                 chip.innerHTML = `${escapeHtml(cat)} <button class="delCatBtn" data-cat="${escapeHtml(cat)}" style="background:none; border:none; cursor:pointer; font-weight:bold;">✖️</button>`;
@@ -580,14 +543,13 @@
                         return; 
                     }
                     await callAPI('deleteCategory', { category: catToRemove });
+                    await loadAllDataFromAPI();
                 });
             });
         }
         
-        // Tabela completa backend
         renderFullExpensesTable();
         
-        // Preencher campos de verba no backend
         document.getElementById("inputMonthlyBudget").value = monthlyBudget;
         document.getElementById("inputPreviousRemaining").value = previousRemaining;
     }
@@ -645,6 +607,7 @@
             const id = parseInt(btn.getAttribute('data-id')); 
             if(confirm("Excluir esta despesa permanentemente?")) {
                 await callAPI('deleteExpense', { id: id });
+                await loadAllDataFromAPI();
             }
         }));
     }
@@ -680,7 +643,7 @@
         document.getElementById("detailModal").style.display = "none"; 
     }
     
-    // Funções de CRUD via API
+    // ===================== CRUD VIA API =====================
     async function addExpenseHandler() {
         const date = document.getElementById("expenseDate").value;
         const value = parseFloat(document.getElementById("expenseValue").value);
@@ -707,12 +670,14 @@
             };
             
             await callAPI('addExpense', { expense: newExpense });
+            await loadAllDataFromAPI();
             
             document.getElementById("expenseDate").value = "";
             document.getElementById("expenseValue").value = "";
             document.getElementById("expenseName").value = "";
             document.getElementById("expenseObs").value = "";
             document.getElementById("expenseFile").value = "";
+            alert("Despesa adicionada!");
         };
         
         if(fileInput.files.length) {
@@ -733,6 +698,7 @@
         if(isNaN(newPrev)) newPrev = 0;
         
         await callAPI('updateBudget', { monthlyBudget: newMonthly, previousRemaining: newPrev });
+        await loadAllDataFromAPI();
         alert("Verbas atualizadas!");
     }
     
@@ -742,10 +708,11 @@
         if(customCategories.includes(newCat)) { alert("Categoria já existe"); return; }
         
         await callAPI('addCategory', { category: newCat });
+        await loadAllDataFromAPI();
         document.getElementById("newCategoryName").value = "";
     }
     
-    // Inicialização e eventos de abas
+    // ===================== INICIALIZAÇÃO =====================
     function initTabs() {
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -760,11 +727,8 @@
     
     async function init() {
         initTabs();
-        
-        // Carregar dados da API
         await loadAllDataFromAPI();
         
-        // Configurar event listeners
         document.getElementById("saveBudgetBtn")?.addEventListener("click", saveBudgetSettings);
         document.getElementById("btnAddExpenseBack")?.addEventListener("click", addExpenseHandler);
         document.getElementById("addCategoryBtn")?.addEventListener("click", addNewCategory);
@@ -773,7 +737,6 @@
             if(e.target === document.getElementById("detailModal")) closeModal(); 
         });
         
-        // setar data atual default no campo datetime
         const now = new Date().toISOString().slice(0,16);
         if(document.getElementById("expenseDate")) document.getElementById("expenseDate").value = now;
     }
